@@ -1,213 +1,230 @@
-output.markdown('# Update the main table!');
-let main_table = base.getTable('Main');
-let checklist_table = base.getTable('Checklist');
-let production_table = base.getTable('Production Motors')
+// pick tables from your base here
+let main_table= base.getTable('Main'); //Motor numbers are here
+//static_task stuff
+let fing_tasks_table = base.getTable('static_tasks');
+let rot_tasks_table = base.getTable('rotator_tasks');
+let flex_tasks_table = base.getTable('flexor_tasks');
+let checklist_table = base.getTable('Checklist') //we want to group them in here
 
-let check_items = await checklist_table.selectRecordsAsync();
-let main_items = await main_table.selectRecordsAsync();
-let production_items = await production_table.selectRecordsAsync();
+//s_tasks
+let finger_task = await fing_tasks_table.selectRecordsAsync();
+let rotator_task = await rot_tasks_table.selectRecordsAsync();
+let flexor_task = await flex_tasks_table.selectRecordsAsync();
 
-let fing_status = main_table.getField("Status").options.choices;
-let digit_status = main_table.getField("Digit").options.choices;
-let people_status = main_table.getField("Assignee(s)").options.choices;
+let m_columns = await main_table.selectRecordsAsync();
+let c_tasks = await checklist_table.selectRecordsAsync();
 
-// output.table(fing_status);
-// output.table(digit_status);
-// output.table(people_status);
-
-//most hecking convoluted script just to check columns >_> stupid airtable
-let dict = {}
-let motorlist = [];
-for (let check of check_items.records){
-    let motor = check.getCellValue("Serial Number");
-    if (!(motorlist.includes(motor))){
-        motorlist.push(motor);
+let history_table = base.getTable("History");
+let history_tasks = await history_table.selectRecordsAsync();
+//UI
+output.markdown('# Using an old motor? Archive the previous records!');
+output.text("This also updates the tasks in the static tasks list to the corresponding motor, but it shouldn't be used that way.")
+let motor_number = await input.textAsync('Serial Number for this motor: (FORMAT EXAMPLE: 19MTR001)');
+for (let check of c_tasks.records){
+    if (motor_number != check.getCellValue("Serial Number")){
+        output.text("Are you sure you put in the right motor number? I can't find this motor! Try again.");
+        let motor_number = await input.textAsync('Serial Number for this motor: (FORMAT EXAMPLE: 19MTR001)');
+        break;
     }
 }
-for (let check of production_items.records){ //both tables
-    let motor = check.getCellValue("Serial Number");
-    if (!(motorlist.includes(motor))){
-        motorlist.push(motor);
+for (let check of c_tasks.records){
+    if (motor_number != check.getCellValue("Serial Number")){
+        output.text("Are you ONE HUNDRED PERCENT SURE you put in the right motor number? Try again >_>");
+        // @ts-ignore
+        return;
     }
 }
-let mainlist = []
-for (let main of main_items.records){
-    mainlist.push(main.getCellValue("Serial Number"));
+let shouldContinue = await input.buttonsAsync(
+    'Which process are you re-doing?',
+    [
+        {label: 'Need to solder wires to encoder board and calibrate (the whole process)', value: 'reset_2'},
+        {label: 'Only encoder case came loose', value: 'reset_7'},
+        {label: 'None! The encode case is fine and calibrated', value: 'noreset'}
+    ],
+);
+//check what kind of motor it is... rotator, flexor or whatever
+let fing_type = null;
+for (let record of c_tasks.records){
+    let c_serial = record.getCellValue("Serial Number");
+    let c_type = record.getCellValue("Type");
+    if (motor_number == c_serial){
+        fing_type = c_type;
+        break
+    }
 }
-let i = 0;
-for (let item of motorlist){
-    if (!(mainlist.includes(item))){
-        await main_table.createRecordsAsync([
-                {
-                    fields: {
-                        "Serial Number": item
-                    }
+//setting variable to te specific table
+let fing_table = null
+if (fing_type = 'Finger') {
+    fing_table = finger_task;
+} else if (fing_type = 'Rotator'){
+    fing_table = rotator_task;
+} else if (fing_type = 'Flexor'){
+    fing_table = flexor_task;
+}
+//counts # of records there are that includes the original motor number
+let count = 0
+for (let record of history_tasks.records){
+    let h_serial = record.getCellValue("Serial Number");
+    if (h_serial.includes(motor_number)){
+        count++;
+    }
+}
+let static_len = fing_table.records.length;
+let motor_number_hist = motor_number;
+if (count >= static_len){
+    let ee = String(Math.floor(count/static_len));
+    motor_number_hist = motor_number.concat('_', ee);
+}
+output.text("The motor in history table is called" + motor_number_hist);
+    //Moving current stuff to history
+output.text("Putting stuff in history.....")
+for (let record of c_tasks.records){
+    let c_serial = record.getCellValue("Serial Number");
+    if (c_serial == motor_number){
+        let c_task = record.getCellValue("To-Do");
+        let c_assignee = record.getCellValueAsString("Assignee");
+        let c_QC = record.getCellValueAsString("QC Approver");
+        let c_date = record.getCellValue("Time Done");
+        let c_stage = record.getCellValue("Stage");
+        let c_order = record.getCellValue("Order");
+        let c_type = record.getCellValue("Type");
+        await history_table.createRecordsAsync([
+            {
+                fields: {
+                    "Tasks": c_task,
+                    "Assignee": c_assignee,
+                    "QC Approver": c_QC,
+                    "Serial Number": motor_number_hist,
+                    "Date Done": c_date,
+                    "Stage":c_stage,
+                    "Order":c_order,
+                    "Type": c_type
                 }
-            ])
-    }
-}//>_< now that every serial item is in
-for (let main of main_items.records){
-    dict[main.getCellValue("Serial Number")] = main.id;
-}
-//this is the options for the single select columns (you have to add the persons name before this works..)
-//let fing_status = main_table.getField("temp").options.choices;
-
-let recordid = '';
-for (let item of motorlist){
-    let respeople = [];
-    let digit = {};
-    let stage = {};
-    let people = [];
-    let date = "";
-    stage = fing_status[0];
-    
-    for (let check of check_items.records){
-        if (check.getCellValue("Serial Number") == item){
-            digit = check.getCellValue("Type");
-            //putting peple in
-            if (respeople.indexOf(check.getCellValueAsString("Assignee")) == -1 && (check.getCellValueAsString("Assignee") != '')){
-                respeople.push(check.getCellValueAsString("Assignee"));
             }
-            //status of the motor
-            //this is for rotator and fingers only -- calibration (order number is specific, CHANGE IT IF STATIC LISTS CHNAGE)
-            if (check.getCellValue("Stage") == "1. Calibration" && check.getCellValue("Order") == "7" && (check.getCellValueAsString("Assignee") != "") && ((check.getCellValue("Type") == "Finger" || check.getCellValue("Type") == "Rotator"))){
-                stage = fing_status[2];
-            } 
-            // this is for flexors -- calibration
-            else if (check.getCellValue("Stage") == "1. Calibration" && check.getCellValue("Order") == "8" && (check.getCellValueAsString("Assignee") != "") && check.getCellValue("Type") == "Flexor"){
-                stage = fing_status[2];
-            }
-            // doesnt matter for flexor -- worm gear part
-            else if (check.getCellValue("Stage") == "2. Worm Gear Assembly" && (check.getCellValue("Order") == "7" || check.getCellValue("Order") == "8") && (check.getCellValueAsString("Assignee") != "")){
-               stage = fing_status[1];
-            }
-            // for fingers -- drivetrain part
-            else if (check.getCellValue("Stage") == "3. Drive Train Assembly" && check.getCellValue("Order") == "8" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee") != "")){
-                stage = fing_status[3];
-            }
-            //for flexor + rotator -- drivetrain part
-            else if (check.getCellValue("Stage") == "3. Drive Train Assembly" && (check.getCellValue("Order") == "8" || check.getCellValue("Order") == "5") && (check.getCellValue("Type") == "Rotator" || check.getCellValue("Type") == "Flexor") && (check.getCellValueAsString("Assignee")!= "")){
-                stage = fing_status[3];
-            }
-            //for fingers only -- in finger
-            else if (check.getCellValue("Stage") == "4. Finger Assembly" && check.getCellValue("Order") == "5" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee")!= "")){
-                stage = fing_status[4];
-            } //for sensorized fingers (fingers only)
-            if (check.getCellValue("Type") == "Finger"){
-                digit = digit_status[0];
-            }
-            if (check.getCellValue("Stage") == "5. Sensor Cable Assembly" && check.getCellValue("Order") == "5" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee")!= "")){
-                digit = digit_status[1]; 
-            }
-            if (check.getCellValue("Type") == "Rotator"){
-                digit = digit_status[2];
-            }
-            if (check.getCellValue("Type") == "Flexor"){
-                digit = digit_status[3];
-            }
-            if (check.getCellValue("Time Done") != null){
-                date = check.getCellValue("Time Done");
-            }
+        ])
+        //deleting everything thats not calibration and wormgear
+        if (c_stage != "1. Calibration" && c_stage != "2. Worm Gear Assembly"){
+            checklist_table.deleteRecordAsync(record.id);
         }
-
-    }
-    //twice for production_items
-    for (let check of production_items.records){
-        if (check.getCellValue("Serial Number") == item){
-            digit = check.getCellValue("Type");
-            //putting peple in
-            if (respeople.indexOf(check.getCellValueAsString("Assignee")) == -1 && (check.getCellValueAsString("Assignee") != '')){
-                respeople.push(check.getCellValueAsString("Assignee"));
-            }
-            //status of the motor
-            //this is for rotator and fingers only -- calibration (order number is specific, CHANGE IT IF STATIC LISTS CHNAGE)
-            if (check.getCellValue("Stage") == "1. Calibration" && check.getCellValue("Order") == "7" && (check.getCellValueAsString("Assignee") != "") && ((check.getCellValue("Type") == "Finger" || check.getCellValue("Type") == "Rotator"))){
-                stage = fing_status[2];
-            } 
-            // this is for flexors -- calibration
-            else if (check.getCellValue("Stage") == "1. Calibration" && check.getCellValue("Order") == "8" && (check.getCellValueAsString("Assignee") != "") && check.getCellValue("Type") == "Flexor"){
-                stage = fing_status[2];
-            }
-            // doesnt matter for flexor -- worm gear part
-            else if (check.getCellValue("Stage") == "2. Worm Gear Assembly" && (check.getCellValue("Order") == "7" || check.getCellValue("Order") == "8") && (check.getCellValueAsString("Assignee") != "")){
-               stage = fing_status[1];
-            }
-            // for fingers -- drivetrain part
-            else if (check.getCellValue("Stage") == "3. Drive Train Assembly" && check.getCellValue("Order") == "8" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee") != "")){
-                stage = fing_status[3];
-            }
-            //for flexor + rotator -- drivetrain part
-            else if (check.getCellValue("Stage") == "3. Drive Train Assembly" && (check.getCellValue("Order") == "8" || check.getCellValue("Order") == "5") && (check.getCellValue("Type") == "Rotator" || check.getCellValue("Type") == "Flexor") && (check.getCellValueAsString("Assignee")!= "")){
-                stage = fing_status[3];
-            }
-            //for fingers only -- in finger
-            else if (check.getCellValue("Stage") == "4. Finger Assembly" && check.getCellValue("Order") == "5" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee")!= "")){
-                stage = fing_status[4];
-            } //for sensorized fingers (fingers only)
-            if (check.getCellValue("Type") == "Finger"){
-                digit = digit_status[0];
-            }
-            if (check.getCellValue("Stage") == "5. Sensor Cable Assembly" && check.getCellValue("Order") == "5" && check.getCellValue("Type") == "Finger" && (check.getCellValueAsString("Assignee")!= "")){
-                digit = digit_status[1]; 
-            }
-            if (check.getCellValue("Type") == "Rotator"){
-                digit = digit_status[2];
-            }
-            if (check.getCellValue("Type") == "Flexor"){
-                digit = digit_status[3];
-            }
-            if (check.getCellValue("Time Done") != null){
-                date = check.getCellValue("Time Done");
-            }
-        }
-
-    }
-    for (var e = 0; e < respeople.length; e++){
-        for (var d = 0; d < people_status.length; d++){
-            if (respeople[e] == people_status[d].name){
-                people.push({id:people_status[d].id, name: people_status[d].name});
-            }
-        }
-    }
-    
-    if (date != null || date != ""){
-        var sdate = date.split("T");
-        date = sdate[0];
-        sdate = date.split("-");
-        date = sdate[1] + "/" + sdate[2] + "/" + sdate[0];
-    }
-
-    if (digit == null || stage == null){
-        continue
-    } else {
-        await main_table.updateRecordAsync(dict[item], {
-                    "Digit": {id: digit.id, name: digit.name},
-                    "Status": {id: stage.id, name: stage.name},
-                    "Assignee(s)": people,
-                    "Last Modified": date
+        //if resets
+        if (shouldContinue == "reset_2"){
+            if (c_stage == "1. Calibration" && parseInt(c_order) > 2){  //if the static_tasks list changes, check this
+                await checklist_table.updateRecordAsync(record.id, {
+                    "Assignee": null,
+                    "QC Approver": null
                 })
+            }
+        } else if (shouldContinue == "reset_7"){
+            let x = 0;
+            if (fing_type == 'Flexor'){
+                x = 7;
+            } else{
+                x = 6
+            }
+            if (c_stage == "1. Calibration" && parseInt(c_order) > x){ //if the static_tasks list changes, check this
+                await checklist_table.updateRecordAsync(record.id, {
+                    "Assignee": null,
+                    "QC Approver": null,
+                    "Time Done": null
+                })
+            }
+        }
     }
-
 }
-let ability_table = base.getTable("Ability Hand Tracking - Motors");
-
-let ability_items = await ability_table.selectRecordsAsync();
-
-let ability_records = {}
-for (let record of ability_items.records){
-    let serial_num = record.getCellValue("Serial Number");
-    let hand_num = record.getCellValue("ABH Serial Number");
-    ability_records[serial_num] = hand_num;
-}
-// output.table(ability_records);
-for (let record of main_items.records){
-    let serial_num = record.getCellValue("Serial Number");
-    if (serial_num in ability_records){
-        let hand_num = ability_records[serial_num];
-        await main_table.updateRecordAsync(record.id, {
-                "ABH Serial Number": hand_num,
+//putting in the updated tasks!
+output.text("Updating the current motor status.......");
+for (let record of fing_table.records){
+    let tasks = record.getCellValue("Tasks"); //Tasks from the static table
+    let stage = record.getCellValue("Stage");
+    let order = record.getCellValue("Order");
+    let typ = record.getCellValue("Type");
+    if (stage != "1. Calibration" && stage != "2. Worm Gear Assembly"){
+        await checklist_table.createRecordsAsync([
+            {
+                fields: {
+                    "To-Do": tasks,
+                    "Serial Number": motor_number,
+                    "Stage":stage,
+                    "Order":order,
+                    "Type":typ
                 }
-            )
+            }
+        ])
     }
 }
-output.markdown("# Done Updating! Check out the Main table");
+// if (shouldContinue == 'reset_2'){
+//     for (let record of c_tasks.records){
+//         let recordID = record.id
+//         let stage = record.getCellValue("Stage");
+//         let order = record.getCellValue("Order");
+//         let motor = record.getCellValue("Serial Number");
+//         if (stage == "1. Calibration" && parseInt(order) > 2 && motor == motor_number){  //if the static_tasks list changes, check this
+//             await checklist_table.updateRecordAsync(recordID, {
+//                 "Assignee": null,
+//                 "QC Approver": null
+//             })
+//         }
+//     }
+//     for (let record of fing_table.records) { //<<<<<<<<<<<<<<<<
+//         let tasks = record.getCellValue("Tasks"); //Tasks from the static table
+//         let stage = record.getCellValue("Stage");
+//         let order = record.getCellValue("Order");
+//         let typ = record.getCellValue("Type");
+//         if (!(stage == "1. Calibration" || stage == "2. Worm Gear Assembly")){
+//             await checklist_table.createRecordsAsync([
+//                 {
+//                     fields: {
+//                         "To-Do": tasks,
+//                         "Serial Number": motor_number,
+//                         "Stage":stage,
+//                         "Order":order,
+//                         "Type":typ
+//                     }
+//                 }
+//             ])
+//         }
+//     }
+// }
+// if (shouldContinue == 'reset_7'){
+//     for (let record of c_tasks.records){
+//         if (record.getCellValueAsString("Assignee") == null && record.getCellValue("Stage") == "3. Drive Train Assembly"){
+//             break
+//         }
+//         let recordID = record.id
+//         let stage = record.getCellValue("Stage");
+//         let order = record.getCellValue("Order");
+//         let motor = record.getCellValue("Serial Number")
+//         let x = 0;
+//         if (fing_type == 'Flexor'){
+//             x = 7;
+//         } else{
+//             x = 6
+//         }
+//         if (stage == "1. Calibration" && parseInt(order) > x && motor == motor_number){ //if the static_tasks list changes, check this
+//             await checklist_table.updateRecordAsync(recordID, {
+//                 "Assignee": null,
+//                 "QC Approver": null
+//             })
+//         }
+//     }
+//     for (let record of fing_table.records) { //<<<<<<<<<<<<<<<<
+//         let tasks = record.getCellValue("Tasks"); //Tasks from the static table
+//         let stage = record.getCellValue("Stage");
+//         let order = record.getCellValue("Order");
+//         let typ = record.getCellValue("Type");
+//         if (!(stage == "1. Calibration" || stage == "2. Worm Gear Assembly")){
+//             await checklist_table.createRecordsAsync([
+//                 {
+//                     fields: {
+//                         "To-Do": tasks,
+//                         "Serial Number": motor_number,
+//                         "Stage":stage,
+//                         "Order":order,
+//                         "Type":typ
+//                     }
+//                 }
+//             ])
+//         }
+//     }
+// }
+output.text('Finished Updating!');
