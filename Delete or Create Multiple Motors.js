@@ -74,6 +74,13 @@ if (whatdo == 'delete'){
                 await production_table.deleteRecordAsync(recordid);
             }
         }
+        for (let record of m_columns.records){
+            let serial = record.getCellValue('Serial Number');
+            if (serial == motor){
+                let recordid = record.id;
+                await main_table.deleteRecordAsync(recordid);
+            }
+        }
     }
 }
 if (whatdo == 'create'){
